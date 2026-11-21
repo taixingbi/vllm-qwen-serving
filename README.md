@@ -107,7 +107,38 @@ curl http://192.168.86.173:8000/v1/models
 
 **Security:** This example uses `--host 0.0.0.0` without API authentication. Restrict access to trusted machines; do not expose port 8000 to the public internet. For wider access, add authentication and network controls.
 
-## 6. Stop or restart the server
+## 6. Monitor metrics
+
+vLLM exposes Prometheus-format metrics at `/metrics` on the same port as the API. No extra flags or restart are needed.
+
+Show all metrics:
+
+```bash
+curl -s http://192.168.86.173:8000/metrics
+```
+
+Show only vLLM's own metrics (skip the Python and process metrics):
+
+```bash
+curl -s http://192.168.86.173:8000/metrics | grep '^vllm:'
+```
+
+Key metrics to watch:
+
+| Metric | Meaning |
+|---|---|
+| `vllm:num_requests_running` | Requests currently being processed. |
+| `vllm:num_requests_waiting` | Requests queued. A steadily non-zero value means the server is saturated. |
+| `vllm:kv_cache_usage_perc` | KV-cache usage from 0 to 1. Near 1.0, requests may be preempted. Older versions call this `vllm:gpu_cache_usage_perc`. |
+| `vllm:prompt_tokens_total` | Total prompt (input) tokens processed. Its rate over time is prefill throughput. |
+| `vllm:generation_tokens_total` | Total generated (output) tokens. Its rate over time is generation throughput. |
+| `vllm:time_to_first_token_seconds` | Histogram of time from request arrival to first output token. |
+| `vllm:inter_token_latency_seconds` | Histogram of time between output tokens. Older versions call this `vllm:time_per_output_token_seconds`. |
+| `vllm:e2e_request_latency_seconds` | Histogram of total request latency. |
+
+Metric names vary between vLLM versions; use the `grep '^vllm:'` output above to confirm the names your installation reports. Histograms appear as `_bucket`, `_sum`, and `_count` series; `_sum` divided by `_count` gives the mean.
+
+## 7. Stop or restart the server
 
 Find the server PID:
 
