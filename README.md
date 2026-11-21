@@ -165,6 +165,67 @@ nvidia-smi dmon -s pucvmet -d 1
 
 When no requests are running, low SM utilization and power do not necessarily mean the model is unloaded: weights and the KV-cache allocator may still occupy VRAM. Use `nvidia-smi` or the `fb` and `bar1` columns in `dmon` to confirm framebuffer and BAR1 memory usage.
 
+### Monitor the GPU from another machine
+
+`nvidia-smi` only runs on the GPU host. To check the GPU from a laptop (for example, a Mac) without installing anything on it, choose one of these options.
+
+**Option A: run `nvidia-smi` over SSH.** This needs no setup:
+
+```bash
+ssh -t tb@192.168.86.173 'nvidia-smi dmon -s pucvmet -d 1'   # Ctrl+C to stop
+```
+
+**Option B: run a GPU metrics exporter on the GPU host.** [nvidia_gpu_exporter](https://github.com/utkuozdemir/nvidia_gpu_exporter) wraps `nvidia-smi` and serves Prometheus-format metrics on port 9835. It works on GeForce cards, and clients can read it with plain `curl`, without SSH.
+
+Install and start it on the GPU host:
+
+```bash
+cd ~
+VER=$(curl -s https://api.github.com/repos/utkuozdemir/nvidia_gpu_exporter/releases/latest | grep -Po '"tag_name": "v\K[^"]+')
+echo "version: $VER"   # if empty, download the linux_x86_64 .tar.gz from the Releases page manually
+curl -LO https://github.com/utkuozdemir/nvidia_gpu_exporter/releases/download/v${VER}/nvidia_gpu_exporter_${VER}_linux_x86_64.tar.gz
+tar xzf nvidia_gpu_exporter_${VER}_linux_x86_64.tar.gz
+sudo mv nvidia_gpu_exporter /usr/local/bin/
+nohup nvidia_gpu_exporter > ~/gpu_exporter.log 2>&1 &
+curl -s localhost:9835/metrics | grep nvidia_smi_power_draw_watts   # verify
+```
+
+Like the vLLM server, `nohup` does not survive a reboot; use a `systemd` service for automatic restarts. Port 9835 has no authentication, so keep it on the trusted LAN. If a client can't reach the port, allow it from the LAN only, for example with `sudo ufw allow from 192.168.86.0/24 to any port 9835 proto tcp`.
+
+From the client, read a few values:
+
+```bash
+curl -s http://192.168.86.173:9835/metrics |
+  grep -E '^nvidia_smi_(power_draw_watts|temperature_gpu|utilization_gpu_ratio|memory_used_bytes)'
+```
+
+Or watch them live in a `dmon`-like table with [scripts/gpuwatch.sh](scripts/gpuwatch.sh), which needs only `curl` and `awk`:
+
+```bash
+scripts/gpuwatch.sh                    # 192.168.86.173, every 1 s
+scripts/gpuwatch.sh 192.168.86.176 2   # other server, every 2 s
+```
+
+| Script column | `dmon` field | Exporter metric |
+|---|---|---|
+| `pwr_W` | `pwr` | `nvidia_smi_power_draw_watts` |
+| `temp_C` | `gtemp` | `nvidia_smi_temperature_gpu` |
+| `sm%` | `sm` | `nvidia_smi_utilization_gpu_ratio` × 100 (the ratio runs from 0 to 1) |
+| `mem%` | `mem` | `nvidia_smi_utilization_memory_ratio` × 100 |
+| `mclk` / `pclk` | `mclk` / `pclk` | `nvidia_smi_clocks_current_memory_clock_hz` / `..._graphics_clock_hz` |
+| `pcap` | roughly `pviol` | `nvidia_smi_clocks_event_reasons_sw_power_cap` (0/1 flag, not a percentage) |
+| `tthrot` | roughly `tviol` | `..._hw_thermal_slowdown` + `..._sw_thermal_slowdown` (0/1 flags) |
+| `fb_MB` | `fb` | `nvidia_smi_memory_used_bytes` ÷ 1,048,576 (MiB) |
+| `bar1_MB` | `bar1` | `nvidia_smi_bar1_memory_used_bytes` ÷ 1,048,576 (MiB) |
+
+The exporter has no direct equivalent of `dmon`'s `pviol` percentage. For cumulative power-cap time, use `nvidia_smi_clocks_event_reasons_counters_sw_power_cap_seconds`. To list every metric name your exporter version reports:
+
+```bash
+curl -s http://192.168.86.173:9835/metrics | grep '^nvidia_smi' | cut -d'{' -f1 | sort -u
+```
+
+Because both the exporter and vLLM's `/metrics` endpoint use the Prometheus format, you can later point Prometheus and Grafana at `<host>:9835` and `<host>:8000` for dashboards and history. Nothing on the GPU host has to change.
+
 ## 7. Stop or restart the server
 
 Find the server PID:
@@ -189,6 +250,8 @@ Replace `<PID>` with the numeric process ID; don't type the angle brackets liter
 | `curl: (7) Failed to connect` | vLLM may still be starting or may have exited. Check `tail -n 50 ~/vllm.log` and `pgrep -af 'vllm serve'`. |
 | CUDA out-of-memory | Confirm other processes are not using VRAM with `nvidia-smi`; try lowering `--max-model-len` or `--gpu-memory-utilization`. |
 | Remote access fails but localhost works | Check the server IP, firewall, LAN routing, and whether TCP port 8000 is allowed. |
+| `tar: ... Cannot open: No such file or directory` when installing the exporter | The release archive wasn't downloaded. Run the `curl -LO` step first and check that `echo "version: $VER"` printed a version. |
+| `brew: command not found` on the GPU host | Homebrew is for macOS. Run `brew` commands on the Mac, not over SSH on the Linux server. |
 
 ## Configuration notes
 

@@ -284,3 +284,39 @@ How to read these idle samples:
 | `bar1` | 4 MB | BAR1 memory currently used. |
 
 An idle GPU can therefore still report substantial framebuffer usage because the model remains loaded. Zero SM utilization is expected between requests; it is not evidence that the vLLM process or model weights were unloaded.
+
+### Reading the same GPU state from the Mac
+
+With [nvidia_gpu_exporter](README.md#monitor-the-gpu-from-another-machine) (v2.0.0) running on the GPU host, the Mac reads the GPU directly with `curl`. It needs no SSH and nothing installed on the Mac:
+
+```bash
+curl -s http://192.168.86.173:9835/metrics |
+  grep -E '^nvidia_smi_(power_draw_watts|temperature_gpu|utilization_gpu_ratio|memory_used_bytes)'
+```
+
+```text
+nvidia_smi_memory_used_bytes{uuid="a837190a-d9c2-ed45-994b-55319c6e258e"} 2.1186281472e+10
+nvidia_smi_power_draw_watts{uuid="a837190a-d9c2-ed45-994b-55319c6e258e"} 29.946
+nvidia_smi_temperature_gpu{uuid="a837190a-d9c2-ed45-994b-55319c6e258e"} 44
+nvidia_smi_utilization_gpu_ratio{uuid="a837190a-d9c2-ed45-994b-55319c6e258e"} 0
+```
+
+| Metric | Raw value | Meaning |
+|---|---|---|
+| `memory_used_bytes` | `2.1186e+10` | About 20,205 MiB (21.2 GB) of VRAM in use; the model is still loaded. |
+| `power_draw_watts` | `29.946` | About 30 W, normal idle power. |
+| `temperature_gpu` | `44` | 44 C. |
+| `utilization_gpu_ratio` | `0` | 0% SM utilization (the ratio runs from 0 to 1). |
+
+The `uuid` label identifies the GPU and can be ignored on a single-GPU host.
+
+For a live `dmon`-style view, [scripts/gpuwatch.sh](scripts/gpuwatch.sh) polls the exporter once per second:
+
+```text
+time      pwr_W temp_C   sm%  mem%   mclk   pclk   pcap tthrot     fb_MB bar1_MB
+06:31:30   30.5     44     0     0    405    210      0      0     20204       4
+06:31:31   38.9     45     0     0    405    210      0      0     20204       4
+06:31:32   31.0     45     0     0    405    210      0      0     20204       4
+```
+
+This matches the `dmon` idle samples above: power, clocks and utilization are at idle levels, and about 20 GiB of VRAM is still held by the loaded model.
