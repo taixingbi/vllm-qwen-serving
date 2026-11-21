@@ -229,3 +229,58 @@ Notes:
 - The `*_created` gauges are the Unix times each counter was created, not measurements. You can skip them.
 - The `vllm:estimated_*_per_gpu_total` counters are 0 here. This snapshot doesn't show why; they appear to be off unless MFU (Model FLOPs Utilization) tracking is turned on.
 - To skip the Python and process metrics, use `curl -s http://192.168.86.173:8000/metrics | grep '^vllm:'`.
+
+### Prefix-cache reset
+
+The server exposes a prefix-cache reset path in this vLLM version:
+
+```bash
+curl -s http://192.168.86.173:8000/openapi.json |
+  grep -o '"/[^"]*reset_prefix_cache[^"]*"'
+```
+
+```text
+"/reset_prefix_cache"
+```
+
+Reset the cache with:
+
+```bash
+curl -X POST http://192.168.86.173:8000/reset_prefix_cache
+```
+
+## 3. GPU idle state
+
+On the GPU host, monitor utilization and memory once per second:
+
+```bash
+nvidia-smi dmon -s pucvmet -d 1
+```
+
+The idle samples looked like this:
+
+```text
+# gpu    pwr  gtemp  mtemp     sm    mem    enc    dec    jpg    ofa   mclk   pclk  pviol  tviol     fb   bar1   ccpm  sbecc  dbecc    pci  rxpci  txpci
+
+    0     28     40      -      0      0      0      0      0      0    405    210      0      0  21437      4      0      -      -      0      0      0
+
+    0     19     40      -      0      0      0      0      0      0    405    210     82      0  21437      4      0      -      -      0      0      0
+
+    0     19     40      -      0      0      0      0      0      0    405    210     99      0  21437      4      0      -      -      0      0      0
+```
+
+How to read these idle samples:
+
+| Field | Typical value | Meaning |
+|---|---:|---|
+| `pwr` | 19-29 W | GPU board power draw. |
+| `gtemp` | 40 C | GPU temperature. |
+| `sm` | 0% | No active streaming-multiprocessor compute. |
+| `mem` | 0% | Memory-controller activity; no active memory workload was shown in these samples. |
+| `mclk` / `pclk` | 405 / 210 MHz | Idle memory and graphics clocks. |
+| `pviol` | 82-99% | Percentage of time in power-violation throttling in the recent sample window. |
+| `tviol` | 0 | No thermal throttling. |
+| `fb` | 21,437 MB | GPU framebuffer occupied by the loaded model and vLLM allocations. |
+| `bar1` | 4 MB | BAR1 memory currently used. |
+
+An idle GPU can therefore still report substantial framebuffer usage because the model remains loaded. Zero SM utilization is expected between requests; it is not evidence that the vLLM process or model weights were unloaded.

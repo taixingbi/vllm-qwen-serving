@@ -138,6 +138,33 @@ Key metrics to watch:
 
 Metric names vary between vLLM versions; use the `grep '^vllm:'` output above to confirm the names your installation reports. Histograms appear as `_bucket`, `_sum`, and `_count` series; `_sum` divided by `_count` gives the mean.
 
+### Reset the prefix cache
+
+Some vLLM versions expose a prefix-cache reset endpoint. Check the OpenAPI paths for it:
+
+```bash
+curl -s http://192.168.86.173:8000/openapi.json |
+  grep -o '"/[^"]*reset_prefix_cache[^"]*"'
+```
+
+If `"/reset_prefix_cache"` is returned, reset the prefix cache with:
+
+```bash
+curl -X POST http://192.168.86.173:8000/reset_prefix_cache
+```
+
+The prefix cache stores reusable prompt KV blocks. Resetting it is useful for cache-focused testing or cleanup, but the next prompts must rebuild cached prefixes, so a reset may temporarily reduce cache-hit throughput.
+
+### Monitor GPU utilization
+
+On the GPU host, sample GPU power, utilization, clocks, memory, and PCI activity once per second:
+
+```bash
+nvidia-smi dmon -s pucvmet -d 1
+```
+
+When no requests are running, low SM utilization and power do not necessarily mean the model is unloaded: weights and the KV-cache allocator may still occupy VRAM. Use `nvidia-smi` or the `fb` and `bar1` columns in `dmon` to confirm framebuffer and BAR1 memory usage.
+
 ## 7. Stop or restart the server
 
 Find the server PID:
