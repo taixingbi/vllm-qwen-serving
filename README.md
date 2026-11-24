@@ -8,8 +8,6 @@ From your local machine:
 
 ```bash
 ssh tb@192.168.86.173
-# or
-ssh tb@192.168.86.176
 ```
 
 Replace the IP address if your server is different.
@@ -203,7 +201,7 @@ Or watch them live in a `dmon`-like table with [scripts/gpuwatch.sh](scripts/gpu
 
 ```bash
 scripts/gpuwatch.sh                    # 192.168.86.173, every 1 s
-scripts/gpuwatch.sh 192.168.86.176 2   # other server, every 2 s
+scripts/gpuwatch.sh 192.168.86.173 2   # explicit host, every 2 s
 ```
 
 | Script column | `dmon` field | Exporter metric |
